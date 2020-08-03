@@ -1,0 +1,45 @@
+fungtion f_pre {
+  ## disable some file system
+  fs=("cramfs" "freevxfs" "jffs2" "hfs" "hfsplus" "udf")
+  for i in "${fs[@]}";
+  do 
+    if [[ $(sudo modprobe -n -v $i 2> /dev/null | grep -E '($i|install)') == "install" ]] | [[ $(sudo modprobe -n -v $i 2> /dev/null | grep -E '($i|install)' 2> /dev/null) == "$i" ]] ; then
+      echo "install $i /bin/true" | sudo tee -a /etc/modprobe.d/filesystem.conf
+      sudo rmmod $i
+    else
+        echo "$i already disabled"
+    fi
+  done
+
+  ## configure /tmp
+  if [[ $(systemctl is-enabled tmp.mount) == enabled ]]; then
+    echo "tmpfs already configured"
+  else
+    sudo cp -v /usr/share/systemd/tmp.mount /etc/systemd/system/
+    sudo sed -i '/Options/c\Options=mode=1777,strictatime,nosuid,nodev,noexec' /etc/systemd/system/tmp.mount
+    sudo systemctl daemon-reload
+    systemctl --now enable tmp.mount
+  fi
+
+  ## configure /dev/shm
+  if [[ $(cat /etc/fstab | grep -E '\s/dev/shm\s' | grep -v '\s/dev/shm\s) == "" ]]; then
+    echo "tmpfs /dev/shm tmpfs defaults,noexec,nodev,nosuid,seclabel 0 0" >> /etc/fstab
+  else
+    echo "/dev/shm already configured"
+  fi
+
+  ## configure sticky bit
+  if [[ $(df --local -P | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -type d \( -perm -0002 -a ! -perm -1000 \) 2>/dev/null) == "" ]]; then
+    echo "sticky bit already configured"
+  else
+    df --local -P | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -type d \( -perm -0002 -a ! -perm -1000 \) 2>/dev/null | xargs -I '{}' chmod a+t '{}'
+  fi
+
+  ## disable autofs
+  if [[ $(dpkg -l | grep ^ii | awk '{print $2}' | grep autofs) == ""]]; then
+    echo "no autofs installed"
+  else
+    sudo systemctl --now mask autofs
+    sudo apt purge autofs
+  fi
+}
