@@ -1,37 +1,40 @@
 #!/bin/bash 
 function f_inetd {
     ## inetd services
-    if [[ $(dpkg -s xinetd 2> /dev/null) == "dpkg-query: package 'xinetd' is not installed" ]]; then
+    if [[ $(dpkg -s xinetd 2> /dev/null) == "is not installed" ]]; then
         echo "xinetd already remove"
     else
-        sudo apt purge xinetd
+        sudo apt purge xinetd -y
     fi
 
-    if [[ $(dpkg -s openbsd-inetd 2> /dev/null) == "dpkg-query: package 'xinetd' is not installed" ]]; then
+    if [[ $(dpkg -s openbsd-inetd 2> /dev/null) == "is not installed" ]]; then
         echo "openbsd-inetd already remove"
     else
-        sudo apt purge openbsd-inetd
+        sudo apt purge openbsd-inetd -y
     fi
 }
 
 function f_sps {
     ### Special purpose services 
-    ##time sync & ntp
-    if [[ $(systemctl is-enabled systemd-timesyncd) == enabled ]] | [[ $(dpkg -s chrony 2> /dev/null) == "dpkg-query: package 'chrony' is not installed" ]]; then
-        echo "no chrony installed"
+    ##time sync & chrony
+    if [[ $(systemctl is-enabled systemd-timesyncd) == enabled ]] | [[ $(dpkg -s chrony 2> /dev/null) == "is not installed" ]]; then
+        sudo apt install chrony -y
     else
-        sudo apt install chrony
+        echo "chrony already installed"
     fi
 
     ##time sync & ntp
-    if [[ $(dpkg -s ntp 2> /dev/null) == "dpkg-query: package 'chrony' is not installed" ]]; then
-        echo "no ntp installed"
+    if [[ $(dpkg -s ntp 2> /dev/null) == "is not installed" ]]; then
+        sudo apt install ntp -y
     else
-        sudo apt install ntp
+        echo "ntp already installed"
     fi
 
 }
 
-#f_inetd
+
+###Untuk test script fungsi nee
+
+# f_inetd
 
 f_sps
