@@ -1,0 +1,183 @@
+function f_logs {
+  uid=$(awk '/^\s*UID_MIN/{print $2}' /etc/login.defs)
+  ## configure auditd
+  if [[ $(dpkg -l | grep ^ii | awk '{print $2}' | grep auditd) == "" ]]; then
+    sudo apt update
+    sudo apt install auditd audispd-plugins -y
+    sudo systemctl --now enable auditd
+  else
+    echo "auditd installed"
+  fi
+  ## enable auditd on boot on func 01_pre
+  ## set audit backlog limit on func 01_pre
+  
+
+  ## collect event date time modified
+  if [[ $(sudo find /etc/audit/rules.d/ -type f -print0 | xargs -0 sudo grep "time-change" 2> /dev/null) == "" ]]; then
+    cat <<EOF | sudo tee -a /etc/audit/rules.d/time-change.rules
+    -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
+    -a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
+    -a always,exit -F arch=b64 -S clock_settime -k time-change
+    -a always,exit -F arch=b32 -S clock_settime -k time-change 
+    -w /etc/localtime -p wa -k time-change
+EOF
+      else
+        echo "time change configured"
+      fi
+  
+  ##  collect identity information  
+  if [[ $(sudo auditctl -l | grep identity) == "" ]]; then
+    cat <<'EOF' | sudo tee -a /etc/audit/rules.d/identity.rules
+    -w /etc/group -p wa -k identity
+    -w /etc/passwd -p wa -k identity
+    -w /etc/gshadow -p wa -k identity
+    -w /etc/shadow -p wa -k identity
+    -w /etc/security/opasswd -p wa -k identity
+EOF
+  else
+    echo "identity information collected"
+  fi
+  
+  ## collect network change event 
+  if [[ $(sudo auditctl -l | grep system-locale) == "" ]]; then
+
+  else
+    echo "system local collected"
+  fi
+  
+  # PENDING
+  ## collect MAC-policy change event
+#   if [[ $(sudo auditctl -l | grep MAC-policy) == "" ]]; then
+#     cat <<'EOF' | sudo tee -a /etc/audit/rules.d/mac-policy.rules
+#     -w /etc/apparmor/ -p wa -k MAC-policy
+#     -w /etc/apparmor.d/ -p wa -k MAC-policy
+# EOF
+#   else
+#     echo "mac policy change event collected"
+#   fi
+  
+  ## collect login/logout event
+  if [[ $(sudo auditctl -l | grep logins) == "" ]]; then
+    cat <<'EOF' | sudo tee -a /etc/audit/rules.d/logins.rules
+    -w /var/log/faillog -p wa -k logins
+    -w /var/log/lastlog -p wa -k logins
+    -w /var/log/tallylog -p wa -k logins
+EOF
+  else
+    echo "login information collected"
+  fi
+  
+  ## collect session initiation information
+  if [[ $(sudo auditctl -l | grep -E '(session|logins)') == "" ]]; then
+    cat <<'EOF' | sudo tee -a /etc/audit/rules.d/sessions.rules
+    -w /var/run/utmp -p wa -k session
+    -w /var/log/wtmp -p wa -k logins
+    -w /var/log/btmp -p wa -k logins
+EOF
+  else
+    echo "session collected"
+  fi
+  
+  ## collect discretionary access control permission modification events
+  if [[ $(sudo auditctl -l |grep perm_mod) == "" ]]; then
+    cat <<EOF | sudo tee -a /etc/audit/rules.d/perm_mod.rules
+    -a always,exit -F arch=b64 -S chmod -S fchmod -S fchmodat -F auid>=$uid -F auid!=4294967295 -k perm_mod
+    -a always,exit -F arch=b32 -S chmod -S fchmod -S fchmodat -F auid>=$uid -F auid!=4294967295 -k perm_mod
+    -a always,exit -F arch=b64 -S chown -S fchown -S fchownat -S lchown -F auid>=$uid -F auid!=4294967295 -k perm_mod
+    -a always,exit -F arch=b32 -S chown -S fchown -S fchownat -S lchown -F auid>=$uid -F auid!=4294967295 -k perm_mod
+    -a always,exit -F arch=b64 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=$uid -F auid!=4294967295 -k perm_mod
+    -a always,exit -F arch=b32 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=$uid -F auid!=4294967295 -k perm_mod
+EOF
+  else
+    echo "DAC collected"
+  fi
+  
+  ## collect unauthorized file access attempts
+  if [[ $(sudo auditctl -l | grep access) == "" ]]; then
+    cat <<EOF | sudo tee -a /etc/audit/rules.d/access.rules
+    -a always,exit -F arch=b64 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EACCES -F auid>=$uid -F auid!=4294967295 -k access
+    -a always,exit -F arch=b32 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EACCES -F auid>=$uid -F auid!=4294967295 -k access
+    -a always,exit -F arch=b64 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EPERM -F auid>=$uid -F auid!=4294967295 -k access
+    -a always,exit -F arch=b32 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EPERM -F auid>=$uid -F auid!=4294967295 -k access
+EOF
+  else
+    echo "unauthorized file access attempts are collected"
+  fi
+  
+  ## Collect use of privileged commands
+  if [[ $(sudo find / -xdev \( -perm -4000 -o -perm -2000 \) -type f | awk '{print "-a always,exit -F path=" $1 " -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged" }') == "" ]]; then
+    echo "use of privileged commands is collected"
+  else
+    sudo find / -xdev \( -perm -4000 -o -perm -2000 \) -type f | awk '{print "-a always,exit -F path=" $1 " -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged" }' | sudo tee -a /etc/audit/rules.d/privileged.rules
+  fi
+  
+  ## Collect successful file system mounts
+  if [[ $(sudo auditctl -l | grep mounts) == "" ]]; then
+    cat << EOF | sudo tee -a /etc/audit/rules.d/mounts.rules
+    -a always,exit -F arch=b64 -S mount -F auid>=$uid -F auid!=4294967295 -k mounts
+    -a always,exit -F arch=b32 -S mount -F auid>=$uid -F auid!=4294967295 -k mounts
+EOF
+  else
+    echo "successful file system mount collected"
+  fi
+  
+  ## Collect file deletion
+  if [[ $(sudo auditctl -l | grep delete) == "" ]]; then
+    cat << EOF | sudo tee -a /etc/audit/rules.d/delete.rules
+    -a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=$uid -F auid!=4294967295 -k delete
+    -a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -F auid>=$uid -F auid!=4294967295 -k delete
+EOF
+  else
+    echo "File deletion information collected"
+  fi
+  
+  ## Collect sudoers change event
+  if [[ $(sudo auditctl -l | grep scope) == "" ]]; then
+    cat << EOF | sudo tee -a /etc/audit/rules.d/scope.rules
+    -w /etc/sudoers -p wa -k scope
+    -w /etc/sudoers.d/ -p wa -k scope
+EOF
+  else
+    echo "Sudoers change event collected"
+  fi
+  
+  ## collect sudo command execution
+  if [[ $(sudo auditctl -l | grep actions) == "" ]]; then
+    echo "-w /var/log/sudo.log -p wa -k actions" | sudo tee -a /etc/audit/rules.d/actions.rules
+  else
+    echo "sudo command execution collected"
+  fi 
+  
+  ## collect kernel load/unload event
+  
+  if [[ $(sudo auditctl -l | grep modules) == "" ]]; then
+
+  else
+    echo "kernel event configured"
+  fi
+  ## finalize auditd rules (immutable)
+  echo "-e 2" | sudo tee -a /etc/audit/rules.d/99-finalize.rules
+  
+  ## load auditd configuration
+  sudo augenrules --load
+  
+  ## END OF AUDITD CONFIGURATION
+  
+  ## install rsyslog
+  if [[ $(sudo dpkg -l | grep ^ii | awk '{print $2}' | grep rsyslog) == "" ]]; then
+    sudo apt install rsyslog -y
+    systemctl --now enable rsyslog
+  else
+    echo "rsyslog installed"
+  fi
+  
+  # Compress logs
+  sudo sed -i '/Compress\=yes/c\Compress\=yes' /etc/systemd/journald.conf
+  
+  # Persistent storage
+  sudo sed -i '/Storage\=/c\Storage\=persistent' /etc/systemd/journald.conf
+  
+  # Configure existing log file permission
+  sudo find /var/log -type f -exec sudo chmod g-wx,o-rwx "{}" + -o -type d -exec sudo chmod g-w,o-rwx "{}" +
+}
+f_logs
