@@ -1,0 +1,299 @@
+#!/bin/bash 
+##AAA (Access, Authentication and authirization)
+
+##Configure time-based job schedulers
+function f_js {
+    ## Ensure cron daemon is enabled and running 
+    if [[ $(systemctl is-enabled cron) == enabled ]] || [[ $(systemctl status cron | grep 'Active: active (running) ') == "" ]];then
+        sudo systemctl --now enable cron
+        f_cronjob    
+    else
+        echo "cron daemon not installted"
+    fi
+}
+    ###This function if cron job is enable f_js
+    function f_cronjob { 
+    ###Ensure permissions on /etc/crontab are configured
+
+    if [[ $(stat /etc/crontab 2> /dev/null | grep Uid | awk '{print $6}') == "root)" ]] && [[ $( stat /etc/crontab 2> /dev/null | grep Gid | awk {'print $10'}) == "root)" ]]; then
+        echo "crontab already configured"
+    else
+        sudo chown root:root /etc/crontab
+        sudo chmod og-rwx /etc/crontab
+        echo "chown crontab"
+    fi
+
+    ###Ensure permissions on /etc/cron.$cronjob are configured
+    cronjob=("hourly" "daily" "weekly" "monthly" "d")
+
+    for i in "${cronjob[@]}"; 
+    do
+        if [[ $(stat /etc/cron.$i/ 2> /dev/null |grep Uid | awk '{print $6}') == "root)" ]] && [[ $( stat /etc/cront$i 2> /dev/null | grep Gid | awk {'print $10'}) == "root)" ]]; then
+            echo "cron.$i already configured"
+        else
+            sudo chown root:root /etc/cron.$i/
+            sudo chmod og-rwx /etc/cron.$i/
+            echo "chown cron.$i"
+        fi
+    done
+
+    ##Ensure cron & at  is restricted to authorized users
+    cron_at=("cron" "at")
+
+    for i in "${cron_at[@]}"; 
+    do
+        if [[ $(stat /etc/$i.deny 2> /dev/null |grep $i.deny | awk '{print $2}') == "/etc/$i.deny" ]] || [[ $(stat /etc/$i.allow 2> /dev/null |grep $i.allow | awk '{print $2}') == "" ]]; then
+            sudo rm /etc/$i.deny
+            sudo touch /etc/$i.allow
+            sudo chmod g-wx,o-rwx /etc/$i.allow
+            sudo chown root:root /etc/$i.allow
+        else
+            echo "$i.deny already remove and $i.allow already configured"
+        fi
+    done
+
+
+    }
+
+##Configure SSH Server
+function f_ssh {
+    ##Ensure permissions on /etc/ssh/sshd_config are configured 
+    if [[ $(stat /etc/ssh/sshd_config 2> /dev/null | grep -i Uid | awk '{print $6}') == "root)" ]] && [[ $(stat /etc/ssh/sshd_config 2> /dev/null | grep Gid | awk '{print $10}') == "root)" ]]; then
+        echo "sshd_config already configured"
+    else
+        sudo chown root:root /etc/ssh/sshd_config
+        sudo chmod og-rwx /etc/ssh/sshd_config
+    fi
+
+    ## Ensure permissions on SSH private&public host key files are configured
+    sudo find /etc/ssh -xdev -type f -name 'ssh_host_*_key' -exec chown root:root {} \;
+    sudo find /etc/ssh -xdev -type f -name 'ssh_host_*_key' -exec chmod 0600 {} \;
+    sudo find /etc/ssh -xdev -type f -name 'ssh_host_*_key.pub' -exec chmod 0644 {} \;
+    sudo find /etc/ssh -xdev -type f -name 'ssh_host_*_key.pub' -exec chown root:root {} \;
+
+    ##Ensure SSH Protocol is not set to 1 (
+    echo "Protocol 2" | sudo tee -a /etc/ssh/sshd_config
+
+    ##Ensure SSH LogLevel is appropriate
+    if [[ $( sshd -T | grep loglevel | awk '{print $2}') == INFO ]]; then
+        echo "SSH LogLevel configured"
+        sudo sed -i '/#LogLevel INFO/c\LogLevel INFO\' /etc/ssh/sshd_config
+    else
+        echo "SSH LogLevel configured"
+        sudo sed -i '/#LogLevel VERBOSE/c\LogLevel INFO\' /etc/ssh/sshd_config
+        sudo sed -i '/LogLevel VERBOSE/c\LogLevel INFO\' /etc/ssh/sshd_config
+    fi
+
+    ## Ensure SSH X11 forwarding is disabled
+    if [[ $( sshd -T | grep x11forwarding | awk '{print $2}') == yes ]]; then
+        echo "SSH X11 forwarding configured"
+        sudo sed -i '/X11Forwarding yes/c\X11Forwarding no' /etc/ssh/sshd_config
+    else
+        echo "SSH X11 forwarding already configured"
+    fi
+
+    ##Ensure SSH MaxAuthTries is set to 4 or less
+    if [[ $( sshd -T | grep maxauthtries | awk '{print $2}') == 6 ]]; then
+        echo "SSH maxauthtries configured"
+        sudo sed -i '/#MaxAuthTries 6/c\MaxAuthTries 4' /etc/ssh/sshd_config
+    else
+        echo "SSH maxauthtries already configured"
+        sudo sed -i '/MaxAuthTries 6/c\MaxAuthTries 4' /etc/ssh/sshd_config
+    fi
+
+    ## Ensure SSH IgnoreRhosts is enabled
+    if [[ $( sshd -T | grep ignorerhosts | awk '{print $2}') == yes ]]; then
+        echo "SSH ignorerhosts configured"
+        sudo sed -i '/#IgnoreRhosts yes/c\IgnoreRhosts yes' /etc/ssh/sshd_config
+    else
+        echo "SSH ignorerhosts configured"
+        sudo sed -i '/IgnoreRhosts no/c\IgnoreRhosts yes' /etc/ssh/sshd_config
+    fi
+    
+    ## Ensure SSH HostbasedAuthentication is disabled
+    if [[ $( sshd -T | grep hostbasedauthentication | awk '{print $2}') == no ]]; then
+        echo "SSH HostbasedAuthentication configured"
+        sudo sed -i '/#HostbasedAuthentication no/c\HostbasedAuthentication no' /etc/ssh/sshd_config
+    else
+        sudo sed -i '/HostbasedAuthentication yes/c\HostbasedAuthentication no' /etc/ssh/sshd_config
+    fi
+
+    ## Ensure SSH root login is disabled 
+    if [[ $( sshd -T | grep permitrootlogin | awk '{print $2}') == no ]]; then
+        echo "SSH permitrootlogin already configured"
+    else
+        echo "PermitRootLogin no" | sudo tee -a /etc/ssh/sshd_config
+    fi
+
+    ## Ensure SSH PermitEmptyPasswords is disabled 
+    if [[ $( sshd -T | grep permitemptypasswords | awk '{print $2}') == no ]]; then
+        echo "SSH permitemptypasswords configured"
+        sudo sed -i '/#PermitEmptyPasswords no/c\PermitEmptyPasswords no' /etc/ssh/sshd_config
+    else
+        echo "SSH permitemptypasswords configured"
+        sudo sed -i '/PermitEmptyPasswords yes/c\PermitEmptyPasswords no' /etc/ssh/sshd_config
+    fi
+
+    ## Ensure SSH PermitUserEnvironment is disabled
+    if [[ $( sshd -T | grep permituserenvironment | awk '{print $2}') == no ]]; then
+        echo "SSH PermitUserEnvironment configured"
+        sudo sed -i '/#PermitUserEnvironment no/c\PermitUserEnvironment no' /etc/ssh/sshd_config
+    else
+        echo "SSH PermitUserEnvironment configured"
+        sudo sed -i '/PermitUserEnvironment yes/c\PermitUserEnvironment no' /etc/ssh/sshd_config
+    fi
+
+    ## Ensure only strong Ciphers are used
+    echo "Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr" | sudo tee -a /etc/ssh/sshd_config
+    
+    ## Ensure only strong MAC algorithms are used 
+    echo "MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256" | sudo tee -a /etc/ssh/sshd_config
+
+    ## Ensure only strong Key Exchange algorithms are used 
+    sudo sed -i '/diffie-hellman-group1-sha1/d' /etc/ssh/sshd_config
+    sudo sed -i '/diffie-hellman-group14-sha1/d' /etc/ssh/sshd_config
+    sudo sed -i '/diffie-hellman-group-exchange-sha1/d' /etc/ssh/sshd_config
+
+
+    ##  Ensure SSH Idle Timeout Interval is configured 
+    sudo sed -i '/#ClientAliveInterval 0/c\ClientAliveInterval 300' /etc/ssh/sshd_config
+    sudo sed -i '/#ClientAliveCountMax 3/c\ClientAliveCountMax 0' /etc/ssh/sshd_config
+
+    ##  Ensure SSH LoginGraceTime is set to one minute or less
+    echo "LoginGraceTime 60" | sudo tee -a /etc/ssh/sshd_config
+
+    ## Ensure SSH access is limited
+    ##5.2.17 need allow&deny user/groups
+
+    ## Ensure SSH warning banner is configured
+    echo "Banner /etc/issue.net" | sudo tee -a /etc/ssh/sshd_config
+
+    ## Ensure SSH PAM is enabled 
+    if [[ $( sshd -T | grep UsePAM | awk '{print $2}') == no ]]; then
+        sudo sed -i '/UsePAM no/c\UsePAM yes' /etc/ssh/sshd_config
+    else
+        echo "SSH UsePAM already configured"
+    fi
+
+    ## Ensure SSH AllowTcpForwarding is disabled
+    sudo sed -i '/#AllowTcpForwarding yes/c\AllowTcpForwarding no' /etc/ssh/sshd_config
+
+    ## Ensure SSH MaxStartups is configured 
+    sudo sed -i '/#MaxStartups 10:30:60/c\Max Startups 10:30:60' /etc/ssh/sshd_config
+
+    ## Ensure SSH MaxSessions is limited
+    sudo sed -i '/#MaxSessions 10/c\MaxSessions 10' /etc/ssh/sshd_config
+
+
+}    
+
+## Configure PAM 
+function f_pam {
+
+    ## Ensure password creation requirements are configured
+    if [[$(grep '^\s*minlen\s*' /etc/security/pwquality.conf 2> /dev/null) == "" ]] || [[ $(grep '^\s*minclass\s*'  /etc/security/pwquality.conf 2> /dev/null) == "" ]] ; then
+        sudo apt install libpam-pwquality -y
+        sudo sed -i '/# minlen/c\minlen = 14' /etc/security/pwquality.conf
+        sudo sed -i '/# minclass/c\minclass = 4' /etc/security/pwquality.conf
+    else
+        echo "Ensure Passowrd creation already configured"
+    fi 
+
+    if [[$(grep -E '^\s*password\s+(requisite|required)\s+pam_pwquality\.so\s+(\S+\s+)*retry=[1-3]\s*(\s+\S+\s*)*(\s+#.*)?$' /etc/pam.d/common-password 2> /dev/null) == "" ]] ; then 
+        sudo sed -i '/retry=3/c\password requisite pam_pwquality.so retry=3' /etc/pam.d/common-password
+    else
+        echo "Ensure Passowrd creation-2 already configured"
+    fi
+
+    ## Ensure lockout for failed password attempts is configured
+
+    if [[ $(grep "pam_tally2" /etc/pam.d/common-auth 2> /dev/null) == "" ]] ; then 
+        echo "auth required pam_tally2.so onerr=fail audit silent deny=5 unlock_time=900" | sudo tee -a /etc/pam.d/common-auth
+    else
+        echo "Ensure lockout for failed already configured"
+    fi
+
+    sleep 3
+
+    if [[ $(grep -E "pam_(tally2)\.so" /etc/pam.d/common-account) == "" ]] ; then 
+        echo "account required pam_tally2.so" | sudo tee -a /etc/pam.d/common-account
+    else
+        echo "Ensure lockout for failed-2 already configured"
+    fi
+
+    ## Ensure password reuse is limited 
+    if [[ $(grep -E '^password\s+required\s+pam_pwhistory.so' /etc/pam.d/common-password 2> /dev/null) == "" ]] ; then 
+        echo "password required pam_pwhistory.so remember=5" | sudo tee -a /etc/pam.d/common-password
+    else
+        echo "Ensure password reuse is limited already configured"
+    fi
+
+    ##Ensure password hashing algorithm is SHA-512 
+    if [[ $(grep -E '^\s*password\s+(\S+\s+)+pam_unix\.so\s+(\S+\s+)*sha512\s*(\S+\s*)*(\s+#.*)?$' /etc/pam.d/common-password) == "" ]] ; then 
+        sudo sed -i '/pam_unix.so/c\password [success=1 default=ignore] pam_unix.so sha512' /etc/pam.d/common-password
+    else
+        echo "Ensure password hashing algorithm is SHA-512  configured"
+    fi
+
+}
+
+function f_uae {
+    # Set Shadow Password Suite Parameters
+    ### Ensure password expiration is 365 days or less
+    if [[ $(cat /etc/login.defs | grep ^PASS_MAX_DAYS | awk '{print $2}') == 99999 ]]; then 
+        sudo sed -i '/99999/c\PASS_MAX_DAYS   365' /etc/login.defs
+        sudo chage --maxdays 365 ubuntu
+    else
+        echo "Ensure password expiration is 365 days already configured"
+    fi
+
+    ### Ensure minimum days between password changes is configured 
+    if [[ $(cat /etc/login.defs | grep ^PASS_MIN_DAYS | awk '{print $2}') == 0 ]] && [[ $(grep -E '^[^:]+:[^!*]' /etc/shadow | cut -d: -f1,5) == "" ]] ; then 
+        sudo sed -i '/^PASS_MIN_DAYS/c\PASS_MIN_DAYS   1' /etc/login.defs
+        sudo chage --mindays 1 ubuntu
+    else
+        echo "Ensure minimum days between password changes already configured"
+    fi
+    
+    ### Ensure password expiration warning days is 7 or more
+    if [[ $(cat /etc/login.defs | grep ^PASS_WARN_AGE | awk '{print $2}') == 7 ]] && [[ $(grep -E '^[^:]+:[^!*]' /etc/shadow | cut -d: -f1,5) == "" ]] ; then 
+        sudo sed -i '/^PASS_WARN_AGE/c\PASS_WARN_AGE   7' /etc/login.defs
+        sudo chage --warndays 7 ubuntu
+        
+    else
+        echo "Ensure minimum days between password changes already configured"
+    fi
+
+    ### Ensure inactive password lock is 30 days or less
+    sudo useradd -D -f 30
+    sudo chage --inactive 30 ubuntu
+
+    ### Ensure all users last password change date is in the past 
+    awk -F: '{print $1}' /etc/shadow | while read -r usr;do [[ $(date --date="$(chage --list "$usr" | grep '^Last password change' | cut -d: -f2)"+%s) > $(date +%s) ]] && echo "$usr last password change was: $(chage --list "$usr" | grep '^Last password change' | cut -d: -f2)"; done
+
+    ### Ensure system accounts are secured
+    #sudo usermod -s $(which nologin) ubuntu
+    #sudo usermod -L ubuntu
+
+    ###  Ensure default group for the root account is GID 0
+    sudo usermod -g 0 root
+
+    ### Ensure default user umask is 027 or more restrictive
+    if [[ $(cat /etc/login.defs | grep ^UMASK | awk '{print $2}') == 022 ]] ; then 
+        sed -i '/^PermitRootLogin/s/yes/no/' /etc/ssh/sshd_config
+        sudo sed -i '/^UMASK/s/022/027/' /etc/login.defs
+    else
+        echo " Ensure default user umask is 027 already configured"
+    fi
+
+    ### Ensure default user shell timeout is 900 seconds or less 
+
+    ### Ensure access to the su command is restricted 
+    sudo groupadd sugroup
+    echo "auth required pam_wheel.so use_uid group=sugroup" | sudo tee -a  /etc/pam.d/su
+}
+
+f_js
+f_ssh
+f_pam
+f_uae
